@@ -1,0 +1,7 @@
+periodic 3 0,5 0 0 0
+periodic 4 1,0 0 255 0
+periodic 19 4,5 255 0 0
+simple_sporadic_server 5 1.5 100 100 255
+aperiodic 3 1,0 255 0 0
+aperiodic 7 2,0 0 255 0
+aperiodic 15,5 2,0 0 0 255
