@@ -72,7 +72,7 @@ void TimeLine::loadFile()
         {
             if (t != NULL)
             {
-                t->addAperiodic(period, execution, makecol(r, g, b));
+                t->addAperiodic((int)period, execution, makecol(r, g, b));
             }
         }
     }

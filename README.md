@@ -31,16 +31,15 @@ aperiodic 7 2,0 0 255 0
 aperiodic 15,5 2,0 0 0 255
 ```
 
-* `periodic`: create a periodic task with following parameters:
-  * Period
-  * Computation time
-  * Colors Red, Green and Blue
-* `simple_sporatic_server`:
-  * Each x time
-  * Computation time
-  * Colors Red, Green and Blue
+Structure:
 
-Running:
+```
+type period computing red green blue
+```
+
+Where `type` is the task type, `period`is the period that task need to complete a quantity of `computing` time. And the last 3 parameters is to configurate color RGB of task.
+
+Execution:
 
 ```
 ./rtsim samples/janeliu.in
@@ -50,3 +49,11 @@ It will generate 2 files:
 
 * `janeliu.out`: with text results
 * `janeliu.bmp`: with image result
+
+Task types:
+
+* periodic
+* simple_sporadic_server
+* deferrable_server
+* pooling_server
+* aperiodic
