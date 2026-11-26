@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <string>
 
 namespace rtsim {
 
@@ -18,15 +21,40 @@ constexpr int kInitW = 1280, kInitH = 720;
 const char* kHelp1 = "Arrows/drag: move   Shift: fast   PgUp/PgDn/wheel: zoom   A: 1:1   F: fit   Home/End: begin/end";
 const char* kHelp2 = "S: save PNG   Esc: exit";
 
-// Monospace TTF if the system has one; raylib's built-in font otherwise.
+// Fallback paths if fontconfig is not available.
 const char* kFontCandidates[] = {
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",       // Debian, Ubuntu
+    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",                   // Arch
+    "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",  // Fedora
     "/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+    "/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
+    "/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
     "/System/Library/Fonts/Menlo.ttc",
     "C:/Windows/Fonts/consola.ttf",
 };
+
+// Asks fontconfig for the system monospace font (TrueType/OpenType only).
+std::string findMonospaceFont() {
+    // RTSIM_FONT=/path/font.ttf chooses a font; RTSIM_FONT=builtin forces raylib's.
+    if (const char* env = std::getenv("RTSIM_FONT")) {
+        if (std::string(env) == "builtin") return {};
+        if (FileExists(env)) return env;
+    }
+#if defined(__unix__) || defined(__APPLE__)
+    if (FILE* p = popen("fc-match -f '%{file}' monospace:fontformat=TrueType 2>/dev/null", "r")) {
+        char buf[1024] = {0};
+        std::string path;
+        if (std::fgets(buf, sizeof buf, p)) path = buf;
+        pclose(p);
+        while (!path.empty() && (path.back() == '\n' || path.back() == ' ')) path.pop_back();
+        if (!path.empty() && FileExists(path.c_str())) return path;
+    }
+#endif
+    for (const char* c : kFontCandidates)
+        if (FileExists(c)) return c;
+    return {};
+}
 
 const ::Color kWhite{255, 255, 255, 255};
 const ::Color kBlack{0, 0, 0, 255};
@@ -44,22 +72,14 @@ public:
     App(const Drawing& d) : d_(d) {}
 
     void load() {
-        font_ = GetFontDefault();
-        ownFont_ = false;
-        for (const char* path : kFontCandidates) {
-            if (!FileExists(path)) continue;
-            Font f = LoadFontEx(path, 32, nullptr, 0);
-            if (f.texture.id != 0) {
-                SetTextureFilter(f.texture, TEXTURE_FILTER_BILINEAR);
-                font_ = f;
-                ownFont_ = true;
-                break;
-            }
-        }
+        fontPath_ = findMonospaceFont();
+        if (fontPath_.empty())
+            TraceLog(LOG_WARNING, "no TrueType monospace font found; using raylib's pixel font");
     }
 
     void unload() {
-        if (ownFont_) UnloadFont(font_);
+        for (auto& [px, f] : fonts_) UnloadFont(f);
+        fonts_.clear();
     }
 
     void update() {
@@ -153,10 +173,9 @@ public:
                 continue;  // annotations would overlap when zoomed far out
             }
             if (t.x < x0 - 400 || t.x > x1 + 50) continue;
-            float size = t.size + 3;
-            Vector2 m = MeasureTextEx(font_, t.text.c_str(), size, 0);
-            float x = sx(t.x) - (t.centered ? m.x / 2 : 0);
-            DrawTextEx(font_, t.text.c_str(), {x, sy(t.y) - size + 2}, size, 0, rc(t.color));
+            int px = static_cast<int>(t.size) + 3;
+            float x = sx(t.x) - (t.centered ? textWidth(t.text.c_str(), px) / 2 : 0);
+            text(t.text.c_str(), x, sy(t.y) - px + 2, px, rc(t.color));
         }
 
         // Cursor hairline with the time under the mouse.
@@ -171,25 +190,52 @@ public:
         BeginScissorMode(0, static_cast<int>(kBarH), static_cast<int>(kGutter), static_cast<int>(H - kBarH));
         for (const auto& r : d_.rows) {
             if (r.shaded) DrawRectangleRec({0, sy(r.y), kGutter, r.h}, ::Color{246, 246, 249, 255});
-            DrawTextEx(font_, r.title.c_str(), {10, sy(r.y) + 8}, 17, 0, ::Color{34, 34, 34, 255});
-            DrawTextEx(font_, r.subtitle.c_str(), {10, sy(r.y) + 28}, 13, 0, ::Color{100, 100, 100, 255});
+            text(r.title.c_str(), 10, sy(r.y) + 8, 17, ::Color{34, 34, 34, 255});
+            text(r.subtitle.c_str(), 10, sy(r.y) + 28, 13, ::Color{100, 100, 100, 255});
         }
         EndScissorMode();
         DrawLineEx({kGutter, kBarH}, {kGutter, H}, 1.0f, ::Color{180, 180, 180, 255});
 
         // Help bar (same lavender as the 2006 version).
         DrawRectangleRec({0, 0, W, kBarH}, ::Color{200, 200, 240, 255});
-        DrawTextEx(font_, kHelp1, {8, 6}, 15, 0, kBlack);
+        text(kHelp1, 8, 6, 15, kBlack);
         char status[160];
         float tUnits = (mx > kGutter) ? ((mx - kGutter) / v_.zoom + v_.offX) / d_.pxPerUnit : -1.0f;
         if (tUnits >= 0)
             std::snprintf(status, sizeof status, "%s      t = %.1f      zoom %.2fx", kHelp2, tUnits, v_.zoom);
         else
             std::snprintf(status, sizeof status, "%s      zoom %.2fx", kHelp2, v_.zoom);
-        DrawTextEx(font_, status, {8, 28}, 15, 0, kBlack);
+        text(status, 8, 28, 15, kBlack);
     }
 
 private:
+    // One font per pixel size: glyphs are rasterized at the exact size used,
+    // instead of scaling a single atlas (which loses thin strokes and dots).
+    const Font& font(int px) {
+        if (fontPath_.empty()) return defaultFont_ = GetFontDefault();
+        auto it = fonts_.find(px);
+        if (it != fonts_.end()) return it->second;
+        Font f = LoadFontEx(fontPath_.c_str(), px, nullptr, 0);
+        if (f.texture.id == 0) {
+            fontPath_.clear();
+            return defaultFont_ = GetFontDefault();
+        }
+        return fonts_.emplace(px, f).first->second;
+    }
+    // raylib's built-in font is 10 px; only integer multiples look right.
+    int drawPx(int px) const { return fontPath_.empty() ? (px >= 17 ? 20 : 10) : px; }
+    void text(const char* s, float x, float y, int px, ::Color c) {
+        int p = drawPx(px);
+        DrawTextEx(font(p), s, {std::round(x), std::round(y)}, static_cast<float>(p), fontPath_.empty() ? 1.0f : 0.0f, c);
+    }
+    float textWidth(const char* s, int px) {
+        int p = drawPx(px);
+        return MeasureTextEx(font(p), s, static_cast<float>(p), fontPath_.empty() ? 1.0f : 0.0f).x;
+    }
+
+    std::string fontPath_;
+    std::map<int, Font> fonts_;
+    Font defaultFont_{};
     bool wantPng_ = false;
     float sx(float x) const { return kGutter + (x - v_.offX) * v_.zoom; }
     float sy(float y) const { return kBarH + (y - v_.offY); }
@@ -233,8 +279,6 @@ public:
 private:
     const Drawing& d_;
     View v_;
-    Font font_{};
-    bool ownFont_ = false;
 };
 
 }  // namespace

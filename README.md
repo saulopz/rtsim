@@ -80,6 +80,10 @@ are still pending, and limited to 5000 time units (use `--length` beyond that).
 
 The help bar also shows the time under the mouse cursor.
 
+The viewer uses the system monospace font found by fontconfig (`fc-match
+monospace`). To choose another one, set `RTSIM_FONT=/path/to/font.ttf`
+(`RTSIM_FONT=builtin` uses raylib's pixel font).
+
 ## Input format
 
 ```
