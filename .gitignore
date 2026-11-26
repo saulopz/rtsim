@@ -1,0 +1,4 @@
+build/
+*.out
+*.svg
+rtsim_*.png
